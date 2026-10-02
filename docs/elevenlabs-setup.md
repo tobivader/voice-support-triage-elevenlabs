@@ -1,68 +1,78 @@
-# ElevenLabs setup guide
+# ElevenLabs Agent Setup
 
-This project is intentionally simple: the Python backend exposes a few clear REST endpoints, and the ElevenLabs agent calls those endpoints through webhook tools.
+The deployed FastAPI service is the source of truth for the synthetic customer records. The ElevenLabs agent should use webhook tools to look up those records and create escalations; it should not infer account state.
 
-## 1. Create the agent
+## Deployment URLs
 
-In the ElevenLabs dashboard:
+- Landing page and voice widget: <https://voice-support-triage-elevenlabs.onrender.com/>
+- Health check: <https://voice-support-triage-elevenlabs.onrender.com/health>
+- Interactive API reference: <https://voice-support-triage-elevenlabs.onrender.com/docs>
 
-- create a new agent;
-- set the system prompt to a support triage assistant;
-- ask for the customer ID when the user reports an access problem;
-- encourage the agent to call the backend instead of inventing account details.
+The Render free service may take a little while to respond after being idle.
 
-Suggested first prompt:
+## Agent behavior
 
-> Hi, I’m the StreamDesk support assistant. I can help troubleshoot account-access issues. What seems to be happening?
+Configure the published agent as a support triage assistant. It should:
 
-## 2. Add webhook tool: get_customer
+- ask for a customer ID before looking up an account;
+- use the `get_customer` webhook result as the only source for account state;
+- explain the result clearly without exposing internal field names unnecessarily;
+- create an engineering escalation only for a confirmed technical issue, such as an active subscription with a disabled entitlement;
+- ask the user to verify an ID if the lookup returns `404`;
+- never claim an escalation was created unless the `create_escalation` tool succeeds.
 
-Use a GET tool with a URL like:
+## Webhook tools
 
-```text
-https://YOUR-RENDER-URL.onrender.com/customers/{customer_id}
+### `get_customer`
+
+- Method: `GET`
+- URL: `https://voice-support-triage-elevenlabs.onrender.com/customers/{customer_id}`
+- Path parameter: `customer_id` (for example, `CUST-102`)
+
+Tell the agent to call this tool before giving account-specific guidance. A known ID returns the customer JSON record; an unknown ID returns `404`.
+
+### `create_escalation`
+
+- Method: `POST`
+- URL: `https://voice-support-triage-elevenlabs.onrender.com/escalations`
+- Content type: `application/json`
+
+Request body fields:
+
+```json
+{
+	"customer_id": "CUST-102",
+	"issue": "Unable to access subscribed content",
+	"finding": "Subscription is active but entitlement is disabled",
+	"troubleshooting_performed": [
+		"Verified customer account",
+		"Verified subscription status",
+		"Checked entitlement state"
+	]
+}
 ```
 
-Path parameter:
+All four fields are required. `troubleshooting_performed` must contain at least one non-empty step. The response includes the submitted details, `status`, an `escalation_id`, and `recommended_team`.
 
-- `customer_id` — customer account ID, for example `CUST-102`
+## Widget
 
-The tool description should tell the agent to fetch the customer record before explaining account status.
+The landing page already embeds the published agent using ElevenLabs' HTML widget. The public agent ID is in `app/static/index.html`; it is an identifier, not an API key. If the widget does not load, confirm the agent is published and check any domain restrictions in the ElevenLabs agent settings. The browser may also prompt the visitor to allow microphone access.
 
-## 3. Add webhook tool: create_escalation
+## End-to-end test cases
 
-Use a POST tool with a URL like:
+| Input | Expected API result | Expected agent behavior |
+| --- | --- | --- |
+| `CUST-101` | Active subscription and entitlement | Explain that the account is active and suggest retry guidance |
+| `CUST-102` | Active subscription, entitlement disabled | Explain the technical issue and create an escalation |
+| `CUST-103` | Inactive subscription | Explain the subscription state; do not create an engineering escalation |
+| `CUST-999` | `404` not found | Ask the customer to verify the ID; do not invent an account |
 
-```text
-https://YOUR-RENDER-URL.onrender.com/escalations
+For direct API checks, open `/docs` on the deployed service or run:
+
+```bash
+curl -i https://voice-support-triage-elevenlabs.onrender.com/customers/CUST-102
 ```
 
-Body fields:
+## Security and demo limitations
 
-- `customer_id`
-- `issue`
-- `finding`
-- `troubleshooting_performed`
-
-The description should tell the agent to call the escalation tool only when an account issue clearly requires engineering follow-up.
-
-## 4. Test the agent flow
-
-Use the demo IDs:
-
-- `CUST-101`: healthy account
-- `CUST-102`: missing entitlement, escalate
-- `CUST-103`: inactive subscription, no engineering escalation
-- `CUST-999`: unknown customer, verify ID
-
-A successful flow should:
-
-1. ask for the customer ID;
-2. call the correct API tool;
-3. explain the result in normal language;
-4. avoid hallucinating account data;
-5. create escalation only in the correct scenarios.
-
-## 5. Public widget
-
-This project includes a placeholder embed in the landing page. Replace the `YOUR_AGENT_ID` value with the public widget ID from the ElevenLabs agent settings.
+The current API is intentionally a public demo: it uses synthetic records, has no authentication, and keeps escalations in memory. Do not send real customer data to it. A production integration needs authentication and authorization, durable storage, appropriate data handling, and monitoring. Never place an ElevenLabs API key or other secret in the browser widget or this repository.
