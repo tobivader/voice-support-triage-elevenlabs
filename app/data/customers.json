@@ -1,0 +1,23 @@
+[
+  {
+    "customer_id": "CUST-101",
+    "name": "Jordan Lee",
+    "subscription_status": "active",
+    "entitlement_enabled": true,
+    "account_status": "active"
+  },
+  {
+    "customer_id": "CUST-102",
+    "name": "Taylor Smith",
+    "subscription_status": "active",
+    "entitlement_enabled": false,
+    "account_status": "active"
+  },
+  {
+    "customer_id": "CUST-103",
+    "name": "Morgan Chen",
+    "subscription_status": "inactive",
+    "entitlement_enabled": false,
+    "account_status": "active"
+  }
+]
